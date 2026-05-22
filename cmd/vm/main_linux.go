@@ -33,6 +33,7 @@ var (
 	debug            bool
 	mtu              int
 	tapPreexists     bool
+	listenMode       bool
 )
 
 func main() {
@@ -45,6 +46,7 @@ func main() {
 	flag.BoolVar(&debug, "debug", false, "debug")
 	flag.IntVar(&mtu, "mtu", 4000, "mtu")
 	flag.BoolVar(&tapPreexists, "preexisting", false, "use preexisting/preconfigured TAP interface")
+	flag.BoolVar(&listenMode, "listen-mode", false, "listen for incoming connection instead of dialing")
 	flag.Parse()
 
 	if version.ShowVersion() {
@@ -72,10 +74,28 @@ func main() {
 }
 
 func run() error {
-	log.Infof("Dialing to %s…", endpoint)
-	conn, path, err := transport.Dial(endpoint)
-	if err != nil {
-		return fmt.Errorf("cannot connect to host: %w", err)
+	var conn net.Conn
+	var path string
+
+	if listenMode {
+		log.Infof("Listening on %s (waiting for host connection)…", endpoint)
+		ln, err := transport.Listen(endpoint)
+		if err != nil {
+			return fmt.Errorf("cannot listen: %w", err)
+		}
+		defer ln.Close()
+		conn, err = ln.Accept()
+		if err != nil {
+			return fmt.Errorf("cannot accept: %w", err)
+		}
+		path = types.ConnectPath
+	} else {
+		log.Infof("Dialing to %s…", endpoint)
+		var err error
+		conn, path, err = transport.Dial(endpoint)
+		if err != nil {
+			return fmt.Errorf("cannot connect to host: %w", err)
+		}
 	}
 	defer conn.Close()
 

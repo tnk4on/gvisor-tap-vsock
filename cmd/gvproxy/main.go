@@ -121,6 +121,32 @@ func InDebugMode() bool {
 	return log.GetLevel().String() == "debug"
 }
 
+type singleConnListener struct {
+	ch   chan net.Conn
+	addr net.Addr
+}
+
+func (l *singleConnListener) Accept() (net.Conn, error) {
+	conn, ok := <-l.ch
+	if !ok {
+		return nil, net.ErrClosed
+	}
+	return conn, nil
+}
+
+func (l *singleConnListener) Close() error {
+	select {
+	case <-l.ch:
+	default:
+		close(l.ch)
+	}
+	return nil
+}
+
+func (l *singleConnListener) Addr() net.Addr {
+	return l.addr
+}
+
 func run(ctx context.Context, g *errgroup.Group, config *GvproxyConfig) error {
 	vn, err := virtualnetwork.New(&config.Stack)
 	if err != nil {
@@ -146,6 +172,38 @@ func run(ctx context.Context, g *errgroup.Group, config *GvproxyConfig) error {
 		}
 		httpServe(ctx, g, ln, withProfiler(vn))
 	}
+
+	if config.Dial != "" {
+		g.Go(func() error {
+			for {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				default:
+				}
+				log.Infof("dialing %s", config.Dial)
+				conn, _, err := transport.Dial(config.Dial)
+				if err != nil {
+					log.Infof("dial failed, retrying in 1s: %v", err)
+					select {
+					case <-time.After(time.Second):
+						continue
+					case <-ctx.Done():
+						return ctx.Err()
+					}
+				}
+				log.Infof("connected to %s", config.Dial)
+				ln := &singleConnListener{
+					ch:   make(chan net.Conn, 1),
+					addr: conn.LocalAddr(),
+				}
+				ln.ch <- conn
+				httpServe(ctx, g, ln, withProfiler(vn))
+				return nil
+			}
+		})
+	}
+
 	notificationSender.Send(types.NotificationMessage{NotificationType: types.Ready})
 
 	if config.Services != "" {

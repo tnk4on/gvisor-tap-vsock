@@ -38,6 +38,7 @@ type GvproxyArgs struct {
 	stdioSocket        string
 	vfkitSocket        string
 	notificationSocket string
+	dial               string
 	forwardSocket      arrayFlags
 	forwardDest        arrayFlags
 	forwardUser        arrayFlags
@@ -51,6 +52,7 @@ type GvproxyArgs struct {
 
 type GvproxyConfig struct {
 	Listen     []string            `yaml:"listen,omitempty"`
+	Dial       string              `yaml:"dial,omitempty"`
 	LogLevel   string              `yaml:"log-level,omitempty"`
 	Stack      types.Configuration `yaml:"stack,omitempty"`
 	Interfaces struct {
@@ -137,6 +139,7 @@ func GvproxyArgParse(flagSet *flag.FlagSet, args *GvproxyArgs, argv []string) (*
 	flagSet.StringVar(&args.logFile, "log-file", "", "Output log messages (logrus) to a given file path")
 	flagSet.StringVar(&args.servicesEndpoint, "services", "", "Exposes the same HTTP API as the --listen flag, without the /connect endpoint")
 	flagSet.BoolVar(&args.ec2MetadataAccess, "ec2-metadata-access", false, "Permits access to EC2 Metadata Service and Amazon Time Sync Service")
+	flagSet.StringVar(&args.dial, "dial", "", "Dial a vsock endpoint instead of listening (host-initiated connection)")
 	flagSet.StringVar(&args.notificationSocket, "notification", "", "Socket to be used to send network-ready notifications")
 	if err := flagSet.Parse(argv); err != nil {
 		return nil, err
@@ -293,6 +296,9 @@ func GvproxyConfigure(config *GvproxyConfig, args *GvproxyArgs, version string) 
 			return config, errors.New("notification listen address must be unix:// address")
 		}
 		config.NotificationSocket = uri.Path
+	}
+	if args.dial != "" {
+		config.Dial = args.dial
 	}
 	if len(args.endpoints) > 0 {
 		config.Listen = args.endpoints
